@@ -84,7 +84,8 @@ const FALLBACK = {
 	swatches: ['#1a1a17', '#3a3a33', '#7a756a', '#b8b1a0', '#f2ecdd'],
 	p1: { bg: '#1a1a17', text: '#ffffff' },
 	p2: { bg: '#1a1a17', text: '#ffffff' },
-	p3: { bg: '#1a1a17', text: '#ffffff' }
+	p3: { bg: '#1a1a17', text: '#ffffff' },
+	p4: { bg: '#1a1a17', text: '#ffffff' }
 };
 
 /**
@@ -141,6 +142,8 @@ export async function extractPalette(url) {
 		swatches,
 		p1: { bg: hex(topBg), text: hex(inkFor(topBg)) },
 		p2: { bg: hex(topBg), text: hex(inkFor(topBg)) },
-		p3: { bg: hex(p3bg), text: hex(inkFor(p3bg)) }
+		p3: { bg: hex(p3bg), text: hex(inkFor(p3bg)) },
+		// Poster 4 ("Vinyl"): solid dominant-colour background, like p1/p2.
+		p4: { bg: hex(topBg), text: hex(inkFor(topBg)) }
 	};
 }

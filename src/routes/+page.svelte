@@ -2,6 +2,7 @@
 	import Poster1 from '$lib/posters/Poster1.svelte';
 	import Poster2 from '$lib/posters/Poster2.svelte';
 	import Poster3 from '$lib/posters/Poster3.svelte';
+	import Poster4 from '$lib/posters/Poster4.svelte';
 	import Viewer3D from '$lib/Viewer3D.svelte';
 	import Slab3D from '$lib/Slab3D.svelte';
 	import EditModal from '$lib/EditModal.svelte';
@@ -12,7 +13,8 @@
 	const STYLES = [
 		{ comp: Poster1, no: '01', name: 'El Disco', tag: 'editorial / gallery', text: true },
 		{ comp: Poster2, no: '02', name: 'Más Fotos', tag: 'analog / film', text: false },
-		{ comp: Poster3, no: '03', name: 'Croma', tag: 'colour pulled from cover', text: true }
+		{ comp: Poster3, no: '03', name: 'Croma', tag: 'colour pulled from cover', text: true },
+		{ comp: Poster4, no: '04', name: 'En Vinilo', tag: 'cover as a vinyl record', text: true }
 	];
 
 	let link = $state('');
@@ -21,8 +23,8 @@
 	let album = $state(null);
 	let palette = $state(null);
 	let swatches = $state([]); // five dominant cover colours, shared by all posters
-	let bgSel = $state([null, null, null]); // per-poster chosen background
-	let textSel = $state([null, null, null]); // per-poster chosen ink
+	let bgSel = $state([null, null, null, null]); // per-poster chosen background
+	let textSel = $state([null, null, null, null]); // per-poster chosen ink
 	let fontSel = $state(ROLE_DEFAULTS.map((d) => ({ ...d }))); // per-poster role → font key
 	let editing = $state(null); // index of the poster being edited (modal open)
 	let exportMenu = $state(null); // index whose PNG/PDF export menu is open
@@ -74,8 +76,8 @@
 		album = null;
 		palette = null;
 		swatches = [];
-		bgSel = [null, null, null];
-		textSel = [null, null, null];
+		bgSel = [null, null, null, null];
+		textSel = [null, null, null, null];
 		fontSel = ROLE_DEFAULTS.map((d) => ({ ...d }));
 		editing = null;
 		exportMenu = null;
@@ -99,9 +101,9 @@
 			palette = pal;
 			if (pal) {
 				swatches = pal.swatches;
-				// STYLES order is [Poster1, Poster2, Poster3] → [p1, p2, p3].
-				bgSel = [pal.p1.bg, pal.p2.bg, pal.p3.bg];
-				textSel = [pal.p1.text, pal.p2.text, pal.p3.text];
+				// STYLES order is [Poster1..4] → [p1..p4].
+				bgSel = [pal.p1.bg, pal.p2.bg, pal.p3.bg, pal.p4.bg];
+				textSel = [pal.p1.text, pal.p2.text, pal.p3.text, pal.p4.text];
 			}
 			serverStreams = body.streams;
 			kworbMissed = !body.streams;
@@ -249,7 +251,6 @@
 
 	<header class="masthead">
 		<div class="hero-text">
-			<div class="kicker">SPOTIFY&nbsp;→&nbsp;PRINT&nbsp;·&nbsp;A4 STUDIES</div>
 			<h1>Create <em>beautiful</em> posters of your favorite album</h1>
 			<p class="lede">
 				Paste a Spotify album link. We pull the cover, tracklist and total streams, then generate three different A4 poster designs inspired by classic record sleeves.
@@ -353,7 +354,7 @@
 
 	<footer class="foot">
 		<span>Cover &amp; tracklist via Spotify · streams via <a href="https://kworb.net" target="_blank" rel="noreferrer">kworb.net</a></span>
-		<span>Three poster studies after a Claude Design original</span>
+		<span>Four poster studies after a Claude Design original</span>
 	</footer>
 </div>
 
@@ -490,13 +491,7 @@
 		pointer-events: none;
 		z-index: -1;
 	}
-
-	.kicker {
-		font-family: 'Space Mono', monospace;
-		font-size: 11px;
-		letter-spacing: 0.28em;
-		color: oklch(0.45 0.1 150);
-	}
+  
 	h1 {
 		font-family: 'Instrument Serif', serif;
 		font-weight: 400;

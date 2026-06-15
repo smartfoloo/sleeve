@@ -24,11 +24,12 @@ export const ROLES = [
 ];
 
 // Per-poster default font for each role, chosen to preserve each design's
-// current look. Indexed to STYLES order: [Poster1, Poster2, Poster3].
+// current look. Indexed to STYLES order: [Poster1, Poster2, Poster3, Poster4].
 export const ROLE_DEFAULTS = [
 	{ title: 'serif', artist: 'serif', labels: 'archivo', tracklist: 'sf', streams: 'serif' },
 	{ title: 'serif', artist: 'mono', labels: 'mono', tracklist: 'mono', streams: 'mono' },
-	{ title: 'serif', artist: 'mono', labels: 'mono', tracklist: 'sf', streams: 'serif' }
+	{ title: 'serif', artist: 'mono', labels: 'mono', tracklist: 'sf', streams: 'serif' },
+	{ title: 'serif', artist: 'grotesk', labels: 'mono', tracklist: 'sf', streams: 'serif' }
 ];
 
 /** Resolve a poster's font props into role → CSS stack, filling any gaps from
