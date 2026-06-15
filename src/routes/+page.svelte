@@ -225,7 +225,7 @@
 </script>
 
 <svelte:head>
-	<title>Sleeve — beautiful posters of your favorite album</title>
+	<title>Sleeve</title>
 	<meta
 		name="description"
 		content="Paste a Spotify album link and generate three print-ready album posters, viewable in 3D."
