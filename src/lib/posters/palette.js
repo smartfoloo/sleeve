@@ -23,6 +23,25 @@ const hex = ({ r, g, b }) =>
 const rgba = ({ r, g, b }, a) => `rgba(${r},${g},${b},${a})`;
 const dist2 = (a, b) => (a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2;
 
+const WHITE = { r: 255, g: 255, b: 255 };
+const BLACK = { r: 0, g: 0, b: 0 };
+
+// Snap a candidate colour to the closest one of `options` so every default we
+// hand out is guaranteed to be a selectable swatch (and not some raw cover
+// pixel that never appears in the picker).
+function nearest(target, options) {
+	let best = options[0];
+	let bestD = dist2(best, target);
+	for (const o of options) {
+		const d = dist2(o, target);
+		if (d < bestD) {
+			bestD = d;
+			best = o;
+		}
+	}
+	return best;
+}
+
 // Tally 16-level-per-channel buckets over a pixel range, keeping true averages.
 function histogram(data, start, end) {
 	const buckets = new Map();
@@ -63,9 +82,9 @@ function distinct(pool, count, minDist = 46) {
 
 const FALLBACK = {
 	swatches: ['#1a1a17', '#3a3a33', '#7a756a', '#b8b1a0', '#f2ecdd'],
-	p1: { bg: '#1a1a17', text: '#f2ecdd' },
-	p2: { bg: '#1a1a17', text: '#f2ecdd' },
-	p3: { bg: '#1a1a17', text: '#f2ecdd' }
+	p1: { bg: '#1a1a17', text: '#ffffff' },
+	p2: { bg: '#1a1a17', text: '#ffffff' },
+	p3: { bg: '#1a1a17', text: '#ffffff' }
 };
 
 /**
@@ -87,28 +106,36 @@ export async function extractPalette(url) {
 	const all = histogram(data, 0, data.length);
 	if (!all.length) return FALLBACK;
 
-	// Five distinct dominant colours across the whole cover (the swatch set).
+	// Five distinct dominant colours across the whole cover (the swatch set,
+	// used as the background options).
 	const present = all.filter((c) => c.n >= 3); // drop stray-pixel noise
 	const pool = present.length ? present : all;
 	const swatchColors = distinct(pool, 5);
 	const swatches = swatchColors.map(hex);
 
-	// Darkest & lightest present colours, used to pick contrasting ink.
+	// Text options mirror EditModal: the first three cover colours plus white
+	// and black, so white and black are always available as ink.
+	const textOptions = [...swatchColors.slice(0, 3), WHITE, BLACK];
+
+	// Darkest & lightest present colours, used to steer ink toward contrast.
 	let darkest = pool[0];
 	let lightest = pool[0];
 	for (const c of pool) {
 		if (lum(c) < lum(darkest)) darkest = c;
 		if (lum(c) > lum(lightest)) lightest = c;
 	}
-	const inkFor = (bg) => (lum(bg) > 0.5 ? darkest : lightest);
+	// A background's default ink: snap the contrasting extreme to the closest
+	// text option so the default is always one of the five swatches.
+	const inkFor = (bg) => nearest(lum(bg) > 0.5 ? darkest : lightest, textOptions);
 
-	// Poster 3 keeps its original background: dominant colour of the bottom 30%.
+	// Poster 3 keeps its original background: dominant colour of the bottom 30%,
+	// snapped to a swatch so the default background is one of the five options.
 	const bottomStart = Math.floor(H * 0.7) * W * 4;
 	const bottom = histogram(data, bottomStart, data.length);
-	const p3bg = bottom.length ? bottom[0] : pool[0];
+	const p3bg = nearest(bottom.length ? bottom[0] : pool[0], swatchColors);
 
-	// Posters 1 & 2: overall dominant colour as background.
-	const topBg = pool[0];
+	// Posters 1 & 2: overall dominant colour as background (also a swatch).
+	const topBg = nearest(pool[0], swatchColors);
 
 	return {
 		swatches,

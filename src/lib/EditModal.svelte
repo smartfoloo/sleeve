@@ -7,8 +7,9 @@
 	import FontSelect from '$lib/FontSelect.svelte';
 	let { style, data, index, swatches, bgSel, textSel, fontSel, onExport, on3D, onClose } = $props();
 
-	// Text palette: four cover colours + white, so white is always available.
-	const textSwatches = $derived([...swatches.slice(0, 4), '#ffffff']);
+	// Text palette: three cover colours + white + black, so white and black are
+	// always available. Mirrors `textOptions` in palette.js (keep in sync).
+	const textSwatches = $derived([...swatches.slice(0, 3), '#ffffff', '#000000']);
 
 	function onKey(e) {
 		if (e.key === 'Escape') onClose?.();
