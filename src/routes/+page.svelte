@@ -172,7 +172,7 @@
 		if (!node) return;
 		busy = `${i}-${kind}`;
 		try {
-			const dataUrl = await rasterize(i, 2);
+			const dataUrl = await rasterize(i, 4);
 			const name = `${slug()}-${STYLES[i].name.toLowerCase().replace(/\s+/g, '-')}`;
 			if (kind === 'png') {
 				const a = document.createElement('a');
