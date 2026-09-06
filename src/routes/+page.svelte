@@ -31,7 +31,8 @@
 	let serverStreams = $state(null);
 	let kworbMissed = $state(false);
 	let manualStreams = $state('');
-	let busy = $state(null); // `${i}-png` | `${i}-pdf` | `${i}-3d` while working
+	let busy = $state(null); // `${i}-png` | `${i}-pdf` | `${i}-3d` | `${i}-share` while working
+	let shareMsg = $state(''); // neutral note shown when the browser can't open a share sheet
 	let view3d = $state(null); // { src, label } while the 3D viewer is open
 
 	let nodes = $state([]);
@@ -84,6 +85,7 @@
 		serverStreams = null;
 		kworbMissed = false;
 		manualStreams = '';
+		shareMsg = '';
 		try {
 			const res = await fetch('/api/album?link=' + encodeURIComponent(q));
 			const body = await res.json();
@@ -187,6 +189,78 @@
 			}
 		} catch (e) {
 			error = 'Export failed: ' + (e?.message || e);
+		} finally {
+			busy = null;
+		}
+	}
+
+	// Instagram Stories are a 1080×1920 (9:16) frame; the poster is ~5:7, so we
+	// centre it on a Story-sized canvas filled with the poster's own background
+	// colour (with a soft shadow so it lifts off the backdrop) and hand back a
+	// PNG blob ready for the native share sheet.
+	function composeStory(posterUrl, bgColor) {
+		return new Promise((resolve, reject) => {
+			const W = 1080;
+			const H = 1920;
+			const canvas = document.createElement('canvas');
+			canvas.width = W;
+			canvas.height = H;
+			const ctx = canvas.getContext('2d');
+			ctx.fillStyle = bgColor || '#1a1a17';
+			ctx.fillRect(0, 0, W, H);
+			const img = new Image();
+			img.onload = () => {
+				// Fit the poster inside the frame with a margin, preserving its ratio.
+				const margin = 110;
+				const maxW = W - margin * 2;
+				const maxH = H - margin * 2;
+				const ar = img.width / img.height;
+				let w = maxW;
+				let h = w / ar;
+				if (h > maxH) {
+					h = maxH;
+					w = h * ar;
+				}
+				const x = (W - w) / 2;
+				const y = (H - h) / 2;
+				ctx.save();
+				ctx.shadowColor = 'rgba(0,0,0,0.35)';
+				ctx.shadowBlur = 48;
+				ctx.shadowOffsetY = 22;
+				ctx.drawImage(img, x, y, w, h);
+				ctx.restore();
+				canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('compose failed'))), 'image/png');
+			};
+			img.onerror = () => reject(new Error('could not load poster image'));
+			img.src = posterUrl;
+		});
+	}
+
+	// Share a poster as an Instagram-Story-shaped image via the native share sheet.
+	// On phones this surfaces Instagram → Stories; on macOS Safari it surfaces
+	// AirDrop / Messages / Mail. Browsers without file sharing (Chrome/Edge on
+	// desktop) get a note pointing at Export instead.
+	async function sharePoster(i) {
+		const node = nodes[i];
+		if (!node) return;
+		busy = `${i}-share`;
+		shareMsg = '';
+		try {
+			const posterUrl = await rasterize(i, 3);
+			const bg = bgSel[i] || posterData.palette?.['p' + (i + 1)]?.bg || '#1a1a17';
+			const blob = await composeStory(posterUrl, bg);
+			const name = `${slug()}-${STYLES[i].name.toLowerCase().replace(/\s+/g, '-')}`;
+			const file = new File([blob], `${name}-story.png`, { type: 'image/png' });
+			const shareData = { files: [file], title: `${album.artist} — ${album.title}` };
+			if (navigator.canShare?.(shareData)) {
+				await navigator.share(shareData);
+			} else {
+				shareMsg =
+					'Sharing to Instagram Stories works from your phone (and Safari on Mac). This browser can’t open a share sheet — use Export to save the image, then post it from your phone.';
+			}
+		} catch (e) {
+			// AbortError = the user dismissed the share sheet; not worth surfacing.
+			if (e?.name !== 'AbortError') error = 'Share failed: ' + (e?.message || e);
 		} finally {
 			busy = null;
 		}
@@ -301,6 +375,13 @@
 		<div class="note error">{error}</div>
 	{/if}
 
+	{#if shareMsg}
+		<div class="note manual">
+			<span>{shareMsg}</span>
+			<button class="linkish" onclick={() => (shareMsg = '')}>Dismiss</button>
+		</div>
+	{/if}
+
 	{#if album && kworbMissed}
 		<div class="note manual">
 			<span>kworb had no stream total for <b>{album.title}</b> — type or paste it below.</span>
@@ -338,6 +419,7 @@
 						{:else}
 							<button class="accent" onclick={() => (exportMenu = i)} disabled={busy !== null}>Export</button>
 							<button onclick={() => (editing = i)} disabled={busy !== null}>Edit</button>
+							<button onclick={() => sharePoster(i)} disabled={busy !== null}>{busy === `${i}-share` ? '…' : 'Share'}</button>
 						{/if}
 					</div>
 					<figcaption>
@@ -368,6 +450,8 @@
 		{textSel}
 		{fontSel}
 		onExport={(kind) => exportPoster(editing, kind)}
+		onShare={() => sharePoster(editing)}
+		sharing={busy === `${editing}-share`}
 		on3D={() => open3D(editing)}
 		onClose={() => (editing = null)}
 	/>

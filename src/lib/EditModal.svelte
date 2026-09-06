@@ -5,7 +5,7 @@
 	// the grid poster behind it stays in sync.
 	import { ROLES } from '$lib/posters/fonts.js';
 	import FontSelect from '$lib/FontSelect.svelte';
-	let { style, data, index, swatches, bgSel, textSel, fontSel, onExport, on3D, onClose } = $props();
+	let { style, data, index, swatches, bgSel, textSel, fontSel, onExport, onShare, sharing, on3D, onClose } = $props();
 
 	// Text palette: three cover colours + white + black, so white and black are
 	// always available. Mirrors `textOptions` in palette.js (keep in sync).
@@ -75,6 +75,7 @@
 					<button class="ed-btn ghost" onclick={on3D}>Preview in 3D</button>
 					<button class="ed-btn" onclick={() => onExport('png')}>Export PNG</button>
 					<button class="ed-btn" onclick={() => onExport('pdf')}>Export PDF</button>
+					<button class="ed-btn share" onclick={onShare} disabled={sharing}>{sharing ? 'Sharing…' : 'Share to Stories'}</button>
 				</div>
 			</div>
 		</div>
@@ -246,6 +247,20 @@
 	.ed-btn.ghost:hover {
 		background: oklch(0.45 0.11 150);
 		color: #f3eee3;
+	}
+	.ed-btn.share {
+		background: linear-gradient(45deg, #f09433, #dc2743 45%, #bc1888 75%, #cc2366);
+		border-color: transparent;
+		color: #fff;
+	}
+	.ed-btn.share:hover {
+		filter: brightness(1.08);
+		background: linear-gradient(45deg, #f09433, #dc2743 45%, #bc1888 75%, #cc2366);
+		border-color: transparent;
+	}
+	.ed-btn.share:disabled {
+		opacity: 0.6;
+		cursor: default;
 	}
 
 	@media (max-width: 720px) {
