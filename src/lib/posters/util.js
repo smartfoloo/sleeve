@@ -8,6 +8,32 @@
  * padding so a 20- or 30-track album still fits instead of clipping.
  * Returns 1 for any album that already fits (≤18 tracks).
  */
+/**
+ * The one small-text size every poster uses — meta lines, labels, track numbers
+ * and track titles all share it, so nothing on a poster is smaller than this.
+ * It is a floor, not a starting point: long tracklists gain a column rather
+ * than shrinking the type below it.
+ */
+export const META_FS = 16;
+
+/**
+ * Split a tracklist into balanced columns. Two reads best, but past ~22 tracks
+ * two columns can't hold the list at META_FS, so a third is added instead of
+ * letting the type shrink.
+ */
+export function trackColumns(tracks, mono = false) {
+	const list = tracks || [];
+	// A monochrome cover leaves the poster stark and typographic, which carries a
+	// denser tracklist well, so it reaches for a third column sooner than a
+	// colour cover does.
+	const threeAt = mono ? 16 : 22;
+	const cols = list.length > 30 ? 4 : list.length > threeAt ? 3 : 2;
+	const per = Math.ceil(list.length / cols) || 1;
+	return Array.from({ length: cols }, (_, i) => list.slice(i * per, (i + 1) * per)).filter(
+		(c) => c.length
+	);
+}
+
 export function trackScale(count, base = 9) {
 	const perCol = Math.ceil((count || 0) / 2) || 1;
 	return Math.min(1, base / perCol);
@@ -26,6 +52,42 @@ export function titleSize(title, base, min = Math.round(base * 0.5)) {
 	const byWord = 12 / Math.max(longest, 1);
 	return Math.max(min, Math.round(base * Math.min(1, byLen, byWord)));
 }
+
+/** A cover shown exactly as delivered: filling its frame, centred, unzoomed. */
+export const FRAME_NEUTRAL = { zoom: 1, x: 0, y: 0 };
+
+// Below 1 the cover no longer fills its frame and the poster's own background
+// shows through around it; above 1 it is cropped. 1 is "fills exactly".
+export const MIN_ZOOM = 0.5;
+export const MAX_ZOOM = 3;
+
+/**
+ * CSS transform that applies a user's cover framing.
+ *
+ * `zoom` is a multiple of the frame (1 = fill exactly). `x`/`y` are normalized
+ * pan: 0 is centred and ±1 is as far as the image can travel before an edge
+ * would enter the frame, so the same values reframe every layout identically
+ * regardless of whether its frame is 148px or 600px across.
+ *
+ * Percentages in `translate()` resolve against the element's own size — the
+ * frame, since the image is sized 100%/100% — which is what makes the values
+ * frame-size independent. `scale` is written last so it applies first and the
+ * translation stays in the frame's own coordinate space.
+ */
+export function coverTransform(frame) {
+	const zoom = clampZoom(frame?.zoom);
+	if (zoom === 1) return 'none';
+	// Zoomed in, the travel is the overflow hidden beyond each edge; zoomed out
+	// it is the slack left inside the frame. Only the magnitude differs, so ±1
+	// still means "an edge of the image meets an edge of the frame" either way.
+	const max = (Math.abs(zoom - 1) / 2) * 100; // furthest travel, as % of the frame
+	const x = (clamp1(frame?.x) * max).toFixed(3);
+	const y = (clamp1(frame?.y) * max).toFixed(3);
+	return `translate(${x}%, ${y}%) scale(${zoom})`;
+}
+
+const clamp1 = (n) => Math.max(-1, Math.min(1, Number(n) || 0));
+export const clampZoom = (n) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Number(n) || 1));
 
 /**
  * Parse a "#rrggbb" hex string into { r, g, b }. Falls back to mid-grey on
@@ -80,22 +142,36 @@ export function autofit(node, params) {
 	};
 }
 
-function fit(node, { bottom = 744, root = '.poster-root', min = 0.45 } = {}) {
+function fit(node, { bottom = 744, root = '.poster-root', min = 0.12 } = {}) {
 	const rootEl = node.closest(root);
 	if (!rootEl) return;
-	// Distance from the poster top to this node, in layout (untransformed) px.
+
+	// Start from a clean slate. A clamp left by the previous run shortens this
+	// node, which grows the `margin-top:auto` block above it and pushes the node
+	// down; measuring in that state reports a smaller budget, which clamps
+	// harder still — so the list ratchets off the bottom of the frame a little
+	// further on every font change.
+	node.style.maxHeight = '';
+	node.style.overflow = '';
+	node.style.setProperty('--fit', '1');
+
+	// Distance from the poster top to this node, in layout (untransformed) px,
+	// read from the cleared layout above. The budget is fixed from this one
+	// reading: where a `margin-top:auto` anchors the block to the bottom, the
+	// node's top rises as it shrinks, so re-measuring inside the loop would
+	// never converge.
 	let top = 0;
 	let el = node;
 	while (el && el !== rootEl) {
 		top += el.offsetTop;
 		el = el.offsetParent;
 	}
+
 	const avail = bottom - top;
 	if (avail <= 0) return;
 	node.style.maxHeight = avail + 'px';
 	node.style.overflow = 'hidden';
 	let f = 1;
-	node.style.setProperty('--fit', '1');
 	let guard = 60;
 	while (node.scrollHeight > avail + 0.5 && f > min && guard-- > 0) {
 		f -= 0.035;
@@ -103,24 +179,3 @@ function fit(node, { bottom = 744, root = '.poster-root', min = 0.45 } = {}) {
 	}
 }
 
-/**
- * Compact form of a formatted stream count ("12,035,304,057") for the
- * stat-hero layouts: { num: "12.03", unit: "Billion", abbr: "12.03B" }.
- */
-export function compactStreams(streamsStr) {
-	const n = Number(String(streamsStr || '').replace(/[^0-9]/g, ''));
-	if (!n) return { num: '—', unit: '', abbr: '—' };
-	const tiers = [
-		[1e9, 'Billion', 'B'],
-		[1e6, 'Million', 'M'],
-		[1e3, 'Thousand', 'K']
-	];
-	for (const [b, unit, suffix] of tiers) {
-		if (n >= b) {
-			const v = n / b;
-			const num = v >= 100 ? String(Math.round(v)) : String(Math.round(v * 100) / 100);
-			return { num, unit, abbr: num + suffix };
-		}
-	}
-	return { num: String(n), unit: '', abbr: String(n) };
-}

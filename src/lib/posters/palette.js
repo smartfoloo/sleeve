@@ -80,8 +80,30 @@ function distinct(pool, count, minDist = 46) {
 	return picked.slice(0, count);
 }
 
+// Mean per-pixel chroma (max channel − min channel, 0–255). A literal
+// black-and-white cover sits near zero; anything with real colour climbs fast.
+// Measured: Die Lit 0.08, Metallica 0.42, With The Beatles 1.9 — then the
+// colour covers start at Whole Lotta Red 4.9, Blonde 10.1, good kid 23.8.
+// 3 sits in that gap, so duotone and sepia covers stay on the colour side.
+const MONO_CHROMA = 3;
+
+function meanChroma(data) {
+	let sum = 0;
+	let n = 0;
+	for (let i = 0; i < data.length; i += 4) {
+		if (data[i + 3] < 125) continue;
+		const r = data[i];
+		const g = data[i + 1];
+		const b = data[i + 2];
+		sum += Math.max(r, g, b) - Math.min(r, g, b);
+		n++;
+	}
+	return n ? sum / n : 0;
+}
+
 const FALLBACK = {
 	swatches: ['#1a1a17', '#3a3a33', '#7a756a', '#b8b1a0', '#f2ecdd'],
+	mono: false,
 	p1: { bg: '#1a1a17', text: '#ffffff' },
 	p2: { bg: '#1a1a17', text: '#ffffff' },
 	p3: { bg: '#1a1a17', text: '#ffffff' },
@@ -114,7 +136,7 @@ export async function extractPalette(url) {
 	const swatchColors = distinct(pool, 5);
 	const swatches = swatchColors.map(hex);
 
-	// Text options mirror EditModal: the first three cover colours plus white
+	// Text options mirror the editor: the first three cover colours plus white
 	// and black, so white and black are always available as ink.
 	const textOptions = [...swatchColors.slice(0, 3), WHITE, BLACK];
 
@@ -140,6 +162,8 @@ export async function extractPalette(url) {
 
 	return {
 		swatches,
+		// Drives the denser tracklist on monochrome covers (see trackColumns).
+		mono: meanChroma(data) <= MONO_CHROMA,
 		p1: { bg: hex(topBg), text: hex(inkFor(topBg)) },
 		p2: { bg: hex(topBg), text: hex(inkFor(topBg)) },
 		p3: { bg: hex(p3bg), text: hex(inkFor(p3bg)) },

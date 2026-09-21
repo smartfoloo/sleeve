@@ -171,19 +171,17 @@
 		padding: 12px 16px;
 		border-bottom: 1px solid rgba(247, 242, 232, 0.1);
 		color: #f7f2e8;
-		font-family: 'Space Mono', monospace;
+		font-family: 'Public Sans', sans-serif;
 	}
 	.tag {
-		font-size: 12px;
-		letter-spacing: 0.1em;
-		text-transform: uppercase;
+		font-size: 13px;
+		letter-spacing: 0.02em;
 	}
 	.hint {
 		flex: 1;
-		font-size: 10px;
-		letter-spacing: 0.08em;
+		font-size: 12px;
+		letter-spacing: 0.02em;
 		color: rgba(247, 242, 232, 0.5);
-		text-transform: uppercase;
 	}
 	.x {
 		flex: none;
@@ -216,9 +214,8 @@
 		align-items: center;
 		justify-content: center;
 		color: rgba(247, 242, 232, 0.6);
-		font-family: 'Space Mono', monospace;
-		font-size: 12px;
-		letter-spacing: 0.1em;
-		text-transform: uppercase;
+		font-family: 'Public Sans', sans-serif;
+		font-size: 13px;
+		letter-spacing: 0.02em;
 	}
 </style>

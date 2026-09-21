@@ -21,14 +21,14 @@
 
 <div class="fs" bind:this={root}>
 	<button type="button" class="fs-btn" class:open onclick={() => (open = !open)} aria-haspopup="listbox" aria-expanded={open}>
-		<span class="fs-cur" style="font-family:{FONTS[value]?.stack}">{FONTS[value]?.label || '—'}</span>
+		<span class="fs-cur" style="font-family:{FONTS[value]?.stack};font-weight:{FONTS[value]?.weight ?? 400}">{FONTS[value]?.label || '—'}</span>
 		<span class="fs-car" aria-hidden="true">▾</span>
 	</button>
 	{#if open}
 		<ul class="fs-list" role="listbox">
 			{#each FONT_KEYS as k}
 				<li role="option" aria-selected={k === value}>
-					<button type="button" class="fs-opt" class:on={k === value} style="font-family:{FONTS[k].stack}" onclick={() => pick(k)}>
+					<button type="button" class="fs-opt" class:on={k === value} style="font-family:{FONTS[k].stack};font-weight:{FONTS[k].weight ?? 400}" onclick={() => pick(k)}>
 						<span>{FONTS[k].label}</span>
 						{#if k === value}<span class="fs-tick" aria-hidden="true">✓</span>{/if}
 					</button>

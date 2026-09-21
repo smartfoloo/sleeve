@@ -4,17 +4,18 @@
 	import Poster3 from '$lib/posters/Poster3.svelte';
 	import Poster4 from '$lib/posters/Poster4.svelte';
 	import Viewer3D from '$lib/Viewer3D.svelte';
-	import Slab3D from '$lib/Slab3D.svelte';
-	import EditModal from '$lib/EditModal.svelte';
+	import Editor from '$lib/Editor.svelte';
 	import { extractPalette } from '$lib/posters/palette.js';
-	import { ROLE_DEFAULTS } from '$lib/posters/fonts.js';
-	import { onMount, tick } from 'svelte';
+	import { ROLE_DEFAULTS, googleFamilies } from '$lib/posters/fonts.js';
+	import { FRAME_NEUTRAL } from '$lib/posters/util.js';
+	import { previewArtwork, bestArtwork, uploadedArtwork } from '$lib/artwork.js';
+	import { tick } from 'svelte';
 
 	const STYLES = [
-		{ comp: Poster1, no: '01', name: 'El Disco', tag: 'editorial / gallery', text: true },
-		{ comp: Poster2, no: '02', name: 'Más Fotos', tag: 'analog / film', text: false },
-		{ comp: Poster3, no: '03', name: 'Croma', tag: 'colour pulled from cover', text: true },
-		{ comp: Poster4, no: '04', name: 'En Vinilo', tag: 'cover as a vinyl record', text: true }
+		{ comp: Poster1, no: '01', name: 'Editorial', tag: 'gallery print', text: true },
+		{ comp: Poster2, no: '02', name: 'Polaroid', tag: 'taped photo', text: false },
+		{ comp: Poster3, no: '03', name: 'Full Bleed', tag: 'cover to the edge', text: true },
+		{ comp: Poster4, no: '04', name: 'Vinyl', tag: 'cover as a record', text: true }
 	];
 
 	let link = $state('');
@@ -26,53 +27,33 @@
 	let bgSel = $state([null, null, null, null]); // per-poster chosen background
 	let textSel = $state([null, null, null, null]); // per-poster chosen ink
 	let fontSel = $state(ROLE_DEFAULTS.map((d) => ({ ...d }))); // per-poster role → font key
-	let editing = $state(null); // index of the poster being edited (modal open)
-	let exportMenu = $state(null); // index whose PNG/PDF export menu is open
-	let serverStreams = $state(null);
-	let kworbMissed = $state(false);
-	let manualStreams = $state('');
-	let busy = $state(null); // `${i}-png` | `${i}-pdf` | `${i}-3d` | `${i}-share` while working
+	// Per-poster cover framing { zoom, x, y }; see coverTransform in util.js.
+	let frameSel = $state(ROLE_DEFAULTS.map(() => ({ ...FRAME_NEUTRAL })));
+	// Which layout the editor is on. Full Bleed (index 2) is the default.
+	const DEFAULT_LAYOUT = 2;
+	let active = $state(DEFAULT_LAYOUT);
+	let art = $state(null); // resolved cover { url, w, h, source, lowRes }
+	let artFull = $state(false); // true once `art` is the export-grade winner
+	let notFound = $state(false); // MusicBrainz has no release for that link
+	let fbArtist = $state('');
+	let fbTitle = $state('');
+	let busy = $state(null); // 'png' | 'pdf' | '3d' | 'share' while working
 	let shareMsg = $state(''); // neutral note shown when the browser can't open a share sheet
 	let view3d = $state(null); // { src, label } while the 3D viewer is open
 
-	let nodes = $state([]);
-
-	// Hero showcase: a 3D render of the "Croma" poster for a fixed album.
-	const HERO_LINK = 'https://open.spotify.com/album/4g1ZRSobMefqF6nelkgibi'; // Hollywood's Bleeding
-	let heroData = $state(null); // poster-shaped data for the hero Poster3
-	let heroBg = $state(null);
-	let heroText = $state(null);
-	let heroPng = $state(null); // rasterised hero poster → 3D texture
-	let heroNode = $state(null); // hidden full-size capture node
-
-	function short(n) {
-		if (!n) return '';
-		if (n >= 1e9) return (+(n / 1e9).toFixed(1) + '').replace(/\.0$/, '') + ' billion';
-		if (n >= 1e6) return (+(n / 1e6).toFixed(1) + '').replace(/\.0$/, '') + ' million';
-		return n.toLocaleString('en-US');
-	}
-
-	const effectiveStreams = $derived.by(() => {
-		const manual = Number(manualStreams.replace(/[^0-9]/g, ''));
-		if (manual) return { streamsStr: manual.toLocaleString('en-US'), streamsShort: short(manual) };
-		return serverStreams;
-	});
+	// The editor's live preview doubles as the capture node for every export.
+	let captureEl = $state(null);
 
 	const posterData = $derived.by(() => {
 		if (!album) return null;
 		return {
 			...album,
-			cover: '/api/cover?u=' + encodeURIComponent(album.cover),
-			streamsStr: effectiveStreams?.streamsStr || '',
-			streamsShort: effectiveStreams?.streamsShort || '',
+			cover: art?.url || '',
 			palette
 		};
 	});
 
-	async function generate() {
-		const q = link.trim();
-		if (!q) return;
-		loading = true;
+	function resetRun() {
 		error = '';
 		album = null;
 		palette = null;
@@ -80,26 +61,44 @@
 		bgSel = [null, null, null, null];
 		textSel = [null, null, null, null];
 		fontSel = ROLE_DEFAULTS.map((d) => ({ ...d }));
-		editing = null;
-		exportMenu = null;
-		serverStreams = null;
-		kworbMissed = false;
-		manualStreams = '';
+		frameSel = ROLE_DEFAULTS.map(() => ({ ...FRAME_NEUTRAL }));
+		active = DEFAULT_LAYOUT;
+		art = null;
+		artFull = false;
+		fullArtPromise = null;
+		notFound = false;
 		shareMsg = '';
+	}
+
+	/** Load an album (by Spotify link, or by typed artist + title) and paint it. */
+	async function load(query) {
+		loading = true;
+		resetRun();
 		try {
-			const res = await fetch('/api/album?link=' + encodeURIComponent(q));
+			const res = await fetch('/api/album?' + query);
 			const body = await res.json();
-			if (!res.ok) throw new Error(body?.message || 'Something went wrong.');
+			if (!res.ok) {
+				if (res.status === 404) notFound = true;
+				throw new Error(body?.message || 'Something went wrong.');
+			}
+			const a = body.album;
+
+			// Artwork is resolved browser-side; the preview pass is small and fast,
+			// and the full-resolution contest runs later, at export time.
+			const preview = await previewArtwork(a);
+
 			// Pull the cover's palette before showing the posters so Croma's
 			// background is ready on first paint (best-effort — neutral fallback).
-			const a = body.album;
 			let pal = null;
-			try {
-				pal = await extractPalette('/api/cover?u=' + encodeURIComponent(a.cover));
-			} catch {
-				pal = null;
+			if (preview) {
+				try {
+					pal = await extractPalette(preview.url);
+				} catch {
+					pal = null;
+				}
 			}
 			album = a;
+			art = preview;
 			palette = pal;
 			if (pal) {
 				swatches = pal.swatches;
@@ -107,13 +106,76 @@
 				bgSel = [pal.p1.bg, pal.p2.bg, pal.p3.bg, pal.p4.bg];
 				textSel = [pal.p1.text, pal.p2.text, pal.p3.text, pal.p4.text];
 			}
-			serverStreams = body.streams;
-			kworbMissed = !body.streams;
+			// Posters are on screen now; get the export-grade cover and the embedded
+			// fonts ready in the background while the user looks at them.
+			warmExport();
 		} catch (e) {
-			error = e?.message || 'Could not generate posters.';
+			// The not-found case has its own inline prompt; don't also shout in the
+			// error banner.
+			if (!notFound) error = e?.message || 'Could not generate posters.';
 		} finally {
 			loading = false;
 		}
+	}
+
+	function generate() {
+		const q = link.trim();
+		if (!q) return;
+		return load('link=' + encodeURIComponent(q));
+	}
+
+	function generateFallback() {
+		if (!fbArtist.trim() || !fbTitle.trim()) return;
+		return load(
+			'artist=' + encodeURIComponent(fbArtist.trim()) + '&title=' + encodeURIComponent(fbTitle.trim())
+		);
+	}
+
+	/** Swap in a cover the user supplied; it outranks all three services. */
+	async function useUpload(e) {
+		const file = e.target.files?.[0];
+		if (!file) return;
+		try {
+			art = await uploadedArtwork(file);
+			artFull = true;
+			palette = await extractPalette(art.url).catch(() => null);
+			if (palette) {
+				swatches = palette.swatches;
+				bgSel = [palette.p1.bg, palette.p2.bg, palette.p3.bg, palette.p4.bg];
+				textSel = [palette.p1.text, palette.p2.text, palette.p3.text, palette.p4.text];
+			}
+		} catch (err) {
+			error = err?.message || 'Could not use that image.';
+		}
+	}
+
+	/** Resolve to the highest-resolution square cover before any capture. Held as
+	 * a promise so a background warm-up and a user's Export click share one run
+	 * rather than racing two contests. */
+	let fullArtPromise = null;
+	function ensureFullArt() {
+		if (artFull || !album) return Promise.resolve();
+		fullArtPromise ??= (async () => {
+			const forAlbum = album;
+			const best = await bestArtwork(forAlbum);
+			// The contest runs in the background, so by the time it lands the user
+			// may have uploaded their own cover (which outranks it) or searched for
+			// a different record. Either way this result is stale — drop it.
+			if (best && !artFull && album === forAlbum) {
+				art = best;
+				await tick();
+				await new Promise((res) => {
+					const img = new Image();
+					img.crossOrigin = 'anonymous';
+					img.onload = img.onerror = () => res();
+					img.src = best.url;
+				});
+			}
+			// Only settle the flag for the record this run was started for; a newer
+			// search has already reset it and owns its own run.
+			if (album === forAlbum) artFull = true;
+		})();
+		return fullArtPromise;
 	}
 
 	function slug() {
@@ -125,26 +187,41 @@
 			.replace(/^-+|-+$/g, '');
 	}
 
-	let fontCssPromise;
-	function getFontCss() {
-		// Fetch the inlined-woff2 CSS once; reused for every export.
-		fontCssPromise ??= fetch('/api/fonts').then((r) => r.text());
-		return fontCssPromise;
+	// Inlined-woff2 CSS, fetched once per set of families and reused for every
+	// export. Only the faces a poster actually draws with are embedded — the
+	// whole menu is ~2MB of base64 and every capture bakes it into the SVG.
+	const fontCssCache = new Map();
+	function getFontCss(families) {
+		const key = [...families].sort().join(',');
+		if (!fontCssCache.has(key)) {
+			fontCssCache.set(
+				key,
+				fetch('/api/fonts?families=' + encodeURIComponent(key)).then((r) => r.text())
+			);
+		}
+		return fontCssCache.get(key);
 	}
 
-	async function rasterizeNode(node, pixelRatio = 2) {
+	async function rasterizeNode(node, pixelRatio = 2, families = []) {
 		if (!node) return null;
-		const [{ toPng }, fontEmbedCSS] = await Promise.all([import('html-to-image'), getFontCss()]);
+		// Every capture path (PNG, PDF, 3D, share) funnels through here, so this is
+		// the one place that needs to guarantee the export-grade cover is in place.
+		await ensureFullArt();
+		const [{ toPng }, fontEmbedCSS] = await Promise.all([
+			import('html-to-image'),
+			getFontCss(families)
+		]);
 		// The node is displayed at scale(0.6) in the grid; capture it at full
 		// 600×848 (transform reset) on an opaque backdrop so the texture fills
 		// the whole frame — otherwise the unfilled area is transparent → black
 		// in the 3D slab.
 		return toPng(node, {
 			pixelRatio,
-			cacheBust: true,
 			// html-to-image's resource cache strips the query string when keying,
-			// so every album's cover (all served from /api/cover?u=…) would collide
-			// and reuse the first album's image. Keep the query in the key.
+			// which would collide across covers whose URLs differ only there.
+			// This keeps the keys distinct; `cacheBust` is deliberately NOT set,
+			// since it defeats the cache outright and makes every capture re-fetch
+			// and re-base64 the full-size cover (measured: 15.6s vs 0.3s).
 			includeQueryParams: true,
 			width: 600,
 			height: 848,
@@ -154,14 +231,28 @@
 		});
 	}
 
-	// The grid nodes are displayed at scale(0.6); capture at full 600×848.
-	const rasterize = (i, pixelRatio = 2) => rasterizeNode(nodes[i], pixelRatio);
+	// The editor's preview is CSS-scaled to fit the stage; rasterizeNode resets
+	// the transform and captures the full 600×848.
+	const rasterize = (pixelRatio = 2) =>
+		rasterizeNode(captureEl, pixelRatio, googleFamilies(ROLE_DEFAULTS[active], fontSel[active]));
 
-	async function open3D(i) {
-		busy = `${i}-3d`;
+	/** Resolve the export-grade cover and the embedded fonts while the user is
+	 * still looking at the posters, so clicking Export or 3D doesn't wait on
+	 * either. Best-effort: a failure here just means the click pays for it. */
+	function warmExport() {
+		ensureFullArt().catch(() => {});
+		// Warm each poster's own family set — the same cache keys rasterize() asks
+		// for. They collapse to one request while the posters share defaults.
+		for (const [i, sel] of fontSel.entries()) {
+			getFontCss(googleFamilies(ROLE_DEFAULTS[i], sel)).catch(() => {});
+		}
+	}
+
+	async function open3D() {
+		busy = '3d';
 		try {
-			const src = await rasterize(i, 2);
-			if (src) view3d = { src, label: STYLES[i].name };
+			const src = await rasterize(2);
+			if (src) view3d = { src, label: STYLES[active].name };
 		} catch (e) {
 			error = '3D view failed: ' + (e?.message || e);
 		} finally {
@@ -169,13 +260,12 @@
 		}
 	}
 
-	async function exportPoster(i, kind) {
-		const node = nodes[i];
-		if (!node) return;
-		busy = `${i}-${kind}`;
+	async function exportPoster(kind) {
+		if (!captureEl) return;
+		busy = kind;
 		try {
-			const dataUrl = await rasterize(i, 4);
-			const name = `${slug()}-${STYLES[i].name.toLowerCase().replace(/\s+/g, '-')}`;
+			const dataUrl = await rasterize(4);
+			const name = `${slug()}-${STYLES[active].name.toLowerCase().replace(/\s+/g, '-')}`;
 			if (kind === 'png') {
 				const a = document.createElement('a');
 				a.href = dataUrl;
@@ -240,16 +330,15 @@
 	// On phones this surfaces Instagram → Stories; on macOS Safari it surfaces
 	// AirDrop / Messages / Mail. Browsers without file sharing (Chrome/Edge on
 	// desktop) get a note pointing at Export instead.
-	async function sharePoster(i) {
-		const node = nodes[i];
-		if (!node) return;
-		busy = `${i}-share`;
+	async function sharePoster() {
+		if (!captureEl) return;
+		busy = 'share';
 		shareMsg = '';
 		try {
-			const posterUrl = await rasterize(i, 3);
-			const bg = bgSel[i] || posterData.palette?.['p' + (i + 1)]?.bg || '#1a1a17';
+			const posterUrl = await rasterize(3);
+			const bg = bgSel[active] || posterData.palette?.['p' + (active + 1)]?.bg || '#1a1a17';
 			const blob = await composeStory(posterUrl, bg);
-			const name = `${slug()}-${STYLES[i].name.toLowerCase().replace(/\s+/g, '-')}`;
+			const name = `${slug()}-${STYLES[active].name.toLowerCase().replace(/\s+/g, '-')}`;
 			const file = new File([blob], `${name}-story.png`, { type: 'image/png' });
 			const shareData = { files: [file], title: `${album.artist} — ${album.title}` };
 			if (navigator.canShare?.(shareData)) {
@@ -266,38 +355,6 @@
 		}
 	}
 
-	onMount(async () => {
-		// Build the hero showcase: fetch the album, render Croma offscreen, then
-		// rasterise it into the 3D slab. Best-effort — the hero simply stays empty
-		// if anything fails (e.g. offline), without affecting the rest of the app.
-		try {
-			const res = await fetch('/api/album?link=' + encodeURIComponent(HERO_LINK));
-			const body = await res.json();
-			if (!res.ok) return;
-			const a = body.album;
-			let pal = null;
-			try {
-				pal = await extractPalette('/api/cover?u=' + encodeURIComponent(a.cover));
-			} catch {
-				pal = null;
-			}
-			heroBg = pal?.p3?.bg ?? null;
-			heroText = pal?.p3?.text ?? null;
-			heroData = {
-				...a,
-				cover: '/api/cover?u=' + encodeURIComponent(a.cover),
-				streamsStr: body.streams?.streamsStr || '',
-				streamsShort: body.streams?.streamsShort || '',
-				palette: pal
-			};
-			await tick();
-			if (document.fonts?.ready) await document.fonts.ready.catch(() => {});
-			await tick();
-			heroPng = await rasterizeNode(heroNode, 2);
-		} catch {
-			/* leave hero empty */
-		}
-	});
 </script>
 
 <svelte:head>
@@ -327,26 +384,10 @@
 		<div class="hero-text">
 			<h1>Create <em>beautiful</em> posters of your favorite album</h1>
 			<p class="lede">
-				Paste a Spotify album link. We pull the cover, tracklist and total streams, then generate three different A4 poster designs inspired by classic record sleeves.
+				Paste a Spotify album link. We pull the cover, tracklist and runtime, then generate four A4 poster designs inspired by classic record sleeves.
 			</p>
 		</div>
-		<div class="hero-art" aria-hidden="true">
-			{#if heroPng}
-				<Slab3D src={heroPng} />
-			{:else}
-				<div class="hero-skel"></div>
-			{/if}
-		</div>
 	</header>
-
-	<!-- offscreen full-size render used only to rasterise the hero 3D slab -->
-	<div class="offscreen" aria-hidden="true">
-		<div class="capture" bind:this={heroNode}>
-			{#if heroData}
-				<Poster3 data={heroData} bg={heroBg} text={heroText} />
-			{/if}
-		</div>
-	</div>
 
 	<section class="console">
 		<label class="field">
@@ -382,78 +423,47 @@
 		</div>
 	{/if}
 
-	{#if album && kworbMissed}
+	{#if notFound}
 		<div class="note manual">
-			<span>kworb had no stream total for <b>{album.title}</b> — type or paste it below.</span>
-			<input
-				type="text"
-				placeholder="e.g. 12,035,304,057"
-				bind:value={manualStreams}
-				inputmode="numeric"
-			/>
+			<span>MusicBrainz has no release for that link yet — enter the artist and album instead.</span>
+			<input type="text" placeholder="Artist" bind:value={fbArtist} autocomplete="off" />
+			<input type="text" placeholder="Album" bind:value={fbTitle} autocomplete="off" />
+			<button class="linkish" onclick={generateFallback}>Look up</button>
 		</div>
 	{/if}
 
-	{#if posterData}
-		<div class="meta">
-			<span class="dot"></span>
-			{album.artist} · {album.title} · {album.trackCount} tracks{album.year
-				? ` · ${album.year}`
-				: ''}{effectiveStreams ? ` · ${effectiveStreams.streamsStr} streams` : ''}
-		</div>
-
-		<section class="grid">
-			{#each STYLES as s, i (s.no)}
-				<figure class="frame">
-					<div class="scaler">
-						<div class="capture" bind:this={nodes[i]}>
-							<s.comp data={posterData} bg={bgSel[i]} text={textSel[i]} fonts={fontSel[i]} />
-						</div>
-					</div>
-					<!-- hover actions over the poster -->
-					<div class="hover">
-						{#if exportMenu === i}
-							<button onclick={() => { exportPoster(i, 'png'); exportMenu = null; }} disabled={busy !== null}>{busy === `${i}-png` ? '…' : 'PNG'}</button>
-							<button onclick={() => { exportPoster(i, 'pdf'); exportMenu = null; }} disabled={busy !== null}>{busy === `${i}-pdf` ? '…' : 'PDF'}</button>
-							<button class="ghost" onclick={() => (exportMenu = null)}>← Back</button>
-						{:else}
-							<button class="accent" onclick={() => (exportMenu = i)} disabled={busy !== null}>Export</button>
-							<button onclick={() => (editing = i)} disabled={busy !== null}>Edit</button>
-							<button onclick={() => sharePoster(i)} disabled={busy !== null}>{busy === `${i}-share` ? '…' : 'Share'}</button>
-						{/if}
-					</div>
-					<figcaption>
-						<span class="cap-label"><b>{s.no}</b> · {s.name}<i>{s.tag}</i></span>
-					</figcaption>
-				</figure>
-			{/each}
-		</section>
-	{:else if !loading}
+	{#if !posterData && !loading}
 		<div class="empty">
 			<p>No record loaded. Try <button class="linkish" onclick={() => { link = 'https://open.spotify.com/album/5K79FLRUCSysQnVESLcTdb'; generate(); }}>Bad Bunny — Debí Tirar Más Fotos</button>.</p>
 		</div>
 	{/if}
 
 	<footer class="foot">
-		<span>Cover &amp; tracklist via Spotify · streams via <a href="https://kworb.net" target="_blank" rel="noreferrer">kworb.net</a></span>
+		<span>Metadata via <a href="https://musicbrainz.org" target="_blank" rel="noreferrer">MusicBrainz</a> · covers via Cover Art Archive, Apple and Deezer</span>
 		<span>Four poster studies after a Claude Design original</span>
 	</footer>
 </div>
 
-{#if editing !== null && posterData}
-	<EditModal
-		style={STYLES[editing]}
+{#if posterData}
+	<Editor
+		styles={STYLES}
+		{active}
+		onActive={(i) => (active = i)}
 		data={posterData}
-		index={editing}
+		{art}
 		{swatches}
 		{bgSel}
 		{textSel}
 		{fontSel}
-		onExport={(kind) => exportPoster(editing, kind)}
-		onShare={() => sharePoster(editing)}
-		sharing={busy === `${editing}-share`}
-		on3D={() => open3D(editing)}
-		onClose={() => (editing = null)}
+		{frameSel}
+		{busy}
+		sharing={busy === 'share'}
+		onExport={exportPoster}
+		onShare={sharePoster}
+		on3D={open3D}
+		onNew={resetRun}
+		onUpload={useUpload}
+		bind:captureEl
 	/>
 {/if}
 
@@ -465,10 +475,19 @@
 	:global(html, body) {
 		margin: 0;
 		background: #d9d6cf;
+		/* The site's sans throughout. Posters set their own font-family on
+		   .poster-root, so this never reaches the artwork. */
+		font-family: 'Public Sans', sans-serif;
 	}
 	:global(*) {
 		-webkit-font-smoothing: antialiased;
 		box-sizing: border-box;
+	}
+	/* Form controls don't inherit font-family, so without this they fall back to
+	   the browser's own sans. The font picker sets its previews inline, which
+	   still wins over this. */
+	:global(button, input, select, textarea) {
+		font-family: inherit;
 	}
 
 	/* top menu bar */
@@ -499,8 +518,8 @@
 		flex: none;
 	}
 	.brand-name {
-		font-family: 'Instrument Serif', serif;
-		font-size: 25px;
+		font-family: 'Libre Baskerville', serif;
+		font-size: 19px;
 		line-height: 1;
 		letter-spacing: 0.01em;
 	}
@@ -512,7 +531,6 @@
 		margin: 0 auto;
 		padding: 44px 28px 80px;
 		color: #1c1916;
-		font-family: 'Archivo', sans-serif;
 	}
 
 	/* faint paper grain */
@@ -542,44 +560,11 @@
 		flex: 1 1 460px;
 		max-width: 600px;
 	}
-	.hero-art {
-		flex: none;
-		width: clamp(280px, 34vw, 400px);
-		height: 470px;
-	}
-	.hero-skel {
-		width: 78%;
-		height: 100%;
-		margin: 0 auto;
-		border-radius: 4px;
-		background: linear-gradient(110deg, rgba(28, 25, 22, 0.06) 30%, rgba(28, 25, 22, 0.12) 50%, rgba(28, 25, 22, 0.06) 70%);
-		background-size: 200% 100%;
-		animation: shimmer 1.4s infinite;
-	}
-	@keyframes shimmer {
-		from {
-			background-position: 200% 0;
-		}
-		to {
-			background-position: -200% 0;
-		}
-	}
-	/* hidden full-size poster, only used to rasterise the hero slab */
-	.offscreen {
-		position: fixed;
-		left: -100000px;
-		top: 0;
-		width: 600px;
-		height: 848px;
-		overflow: hidden;
-		pointer-events: none;
-		z-index: -1;
-	}
   
 	h1 {
-		font-family: 'Instrument Serif', serif;
+		font-family: 'Libre Baskerville', serif;
 		font-weight: 400;
-		font-size: clamp(38px, 5.4vw, 66px);
+		font-size: clamp(28px, 3.8vw, 46px);
 		line-height: 1;
 		letter-spacing: -0.015em;
 		margin: 14px 0 0;
@@ -619,14 +604,13 @@
 		gap: 7px;
 	}
 	.field-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 10px;
-		letter-spacing: 0.18em;
-		text-transform: uppercase;
+		font-family: 'Public Sans', sans-serif;
+		font-size: 13px;
+		letter-spacing: 0.02em;
 		color: #8a8276;
 	}
 	.field input {
-		font-family: 'Space Mono', monospace;
+		font-family: 'Public Sans', sans-serif;
 		font-size: 15px;
 		padding: 11px 12px;
 		border: 1.5px solid rgba(28, 25, 22, 0.25);
@@ -640,7 +624,7 @@
 	}
 	.go {
 		align-self: flex-end;
-		font-family: 'Archivo', sans-serif;
+		font-family: 'Public Sans', sans-serif;
 		font-weight: 700;
 		font-size: 15px;
 		letter-spacing: 0.02em;
@@ -665,7 +649,7 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 6px 22px;
-		font-family: 'Space Mono', monospace;
+		font-family: 'Public Sans', sans-serif;
 		font-size: 11px;
 		color: #8a8276;
 		letter-spacing: 0.02em;
@@ -698,138 +682,12 @@
 		flex-wrap: wrap;
 	}
 	.note.manual input {
-		font-family: 'Space Mono', monospace;
+		font-family: 'Public Sans', sans-serif;
 		padding: 8px 10px;
 		border: 1.5px solid rgba(28, 25, 22, 0.3);
 		background: #fffdf8;
 		font-size: 14px;
 		flex: 1 1 200px;
-	}
-
-	.meta {
-		margin-top: 30px;
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		font-family: 'Space Mono', monospace;
-		font-size: 12px;
-		letter-spacing: 0.04em;
-		color: #4a463f;
-		border-top: 1.5px solid #1c1916;
-		border-bottom: 1.5px solid rgba(28, 25, 22, 0.15);
-		padding: 10px 0;
-	}
-	.dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		background: oklch(0.55 0.13 152);
-		flex: none;
-	}
-
-	/* poster grid */
-	.grid {
-		margin-top: 28px;
-		display: flex;
-		flex-wrap: wrap;
-		gap: 30px;
-		justify-content: center;
-	}
-	.frame {
-		margin: 0;
-		width: 360px;
-		position: relative;
-	}
-	.scaler {
-		position: relative;
-		width: 360px;
-		height: 508.8px; /* 848 * 0.6 */
-		overflow: hidden;
-		background: #fff;
-		box-shadow: 0 18px 40px -22px rgba(28, 25, 22, 0.6), 0 0 0 1px rgba(28, 25, 22, 0.12);
-		cursor: pointer;
-	}
-	.capture {
-		width: 600px;
-		height: 848px;
-		transform: scale(0.6);
-		transform-origin: top left;
-	}
-
-	/* hover action overlay — covers only the poster, not the labels below */
-	.hover {
-		position: absolute;
-		left: 0;
-		right: 0;
-		top: 0;
-		height: 508.8px; /* poster area only (848 * 0.6) */
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		gap: 10px;
-		background: rgba(16, 14, 12, 0.44);
-		opacity: 0;
-		transition: opacity 0.16s;
-		pointer-events: none;
-		cursor: pointer;
-	}
-	.frame:hover .hover,
-	.hover:focus-within {
-		opacity: 1;
-		pointer-events: auto;
-	}
-	.hover button {
-		font-family: 'Space Mono', monospace;
-		font-size: 12px;
-		letter-spacing: 0.06em;
-		padding: 10px 18px;
-		min-width: 152px;
-		border: 1.5px solid #f3eee3;
-		background: rgba(243, 238, 227, 0.95);
-		color: #1c1916;
-		cursor: pointer;
-		transition: transform 0.12s, background 0.13s;
-	}
-	.hover button:hover:not(:disabled) {
-		transform: translateY(-1px);
-	}
-	.hover button:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-	.hover button.accent {
-		background: oklch(0.45 0.11 150);
-		border-color: oklch(0.45 0.11 150);
-		color: #f3eee3;
-	}
-	.hover button.ghost {
-		background: transparent;
-		color: #f3eee3;
-	}
-
-	figcaption {
-		margin-top: 12px;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: 10px;
-	}
-	.cap-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 11px;
-		letter-spacing: 0.04em;
-		color: #4a463f;
-	}
-	.cap-label b {
-		color: oklch(0.45 0.11 150);
-	}
-	.cap-label i {
-		display: block;
-		font-style: normal;
-		font-size: 9.5px;
-		opacity: 0.6;
-		margin-top: 2px;
 	}
 
 	.empty {
@@ -856,7 +714,7 @@
 		justify-content: space-between;
 		flex-wrap: wrap;
 		gap: 8px;
-		font-family: 'Space Mono', monospace;
+		font-family: 'Public Sans', sans-serif;
 		font-size: 10.5px;
 		letter-spacing: 0.04em;
 		color: #8a8276;
@@ -870,19 +728,10 @@
 			flex-direction: column;
 			align-items: flex-start;
 		}
-		.hero-art {
-			width: 100%;
-			max-width: 360px;
-			height: 420px;
-			align-self: center;
-		}
 	}
 	@media (max-width: 640px) {
 		.go {
 			width: 100%;
-		}
-		.hero-art {
-			display: none;
 		}
 	}
 </style>
