@@ -17,14 +17,13 @@ function loadImage(url) {
 	});
 }
 
-const lum = ({ r, g, b }) => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 const hex = ({ r, g, b }) =>
 	'#' + [r, g, b].map((v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('');
 const rgba = ({ r, g, b }, a) => `rgba(${r},${g},${b},${a})`;
 const dist2 = (a, b) => (a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2;
 
-const WHITE = { r: 255, g: 255, b: 255 };
-const BLACK = { r: 0, g: 0, b: 0 };
+// The default ink on every poster.
+const INK = '#ffffff';
 
 // Snap a candidate colour to the closest one of `options` so every default we
 // hand out is guaranteed to be a selectable swatch (and not some raw cover
@@ -104,10 +103,10 @@ function meanChroma(data) {
 const FALLBACK = {
 	swatches: ['#1a1a17', '#3a3a33', '#7a756a', '#b8b1a0', '#f2ecdd'],
 	mono: false,
-	p1: { bg: '#1a1a17', text: '#ffffff' },
-	p2: { bg: '#1a1a17', text: '#ffffff' },
-	p3: { bg: '#1a1a17', text: '#ffffff' },
-	p4: { bg: '#1a1a17', text: '#ffffff' }
+	p1: { bg: '#1a1a17', text: INK },
+	p2: { bg: '#1a1a17', text: INK },
+	p3: { bg: '#1a1a17', text: INK },
+	p4: { bg: '#1a1a17', text: INK }
 };
 
 /**
@@ -136,21 +135,6 @@ export async function extractPalette(url) {
 	const swatchColors = distinct(pool, 5);
 	const swatches = swatchColors.map(hex);
 
-	// Text options mirror the editor: the first three cover colours plus white
-	// and black, so white and black are always available as ink.
-	const textOptions = [...swatchColors.slice(0, 3), WHITE, BLACK];
-
-	// Darkest & lightest present colours, used to steer ink toward contrast.
-	let darkest = pool[0];
-	let lightest = pool[0];
-	for (const c of pool) {
-		if (lum(c) < lum(darkest)) darkest = c;
-		if (lum(c) > lum(lightest)) lightest = c;
-	}
-	// A background's default ink: snap the contrasting extreme to the closest
-	// text option so the default is always one of the five swatches.
-	const inkFor = (bg) => nearest(lum(bg) > 0.5 ? darkest : lightest, textOptions);
-
 	// Poster 3 keeps its original background: dominant colour of the bottom 30%,
 	// snapped to a swatch so the default background is one of the five options.
 	const bottomStart = Math.floor(H * 0.7) * W * 4;
@@ -164,10 +148,14 @@ export async function extractPalette(url) {
 		swatches,
 		// Drives the denser tracklist on monochrome covers (see trackColumns).
 		mono: meanChroma(data) <= MONO_CHROMA,
-		p1: { bg: hex(topBg), text: hex(inkFor(topBg)) },
-		p2: { bg: hex(topBg), text: hex(inkFor(topBg)) },
-		p3: { bg: hex(p3bg), text: hex(inkFor(p3bg)) },
+		// Ink is white on every design by default. It used to be picked for
+		// contrast against each background, which meant dark type whenever the
+		// cover's dominant colour came out light; white reads as one deliberate
+		// house style instead. Both remain selectable per design in the editor.
+		p1: { bg: hex(topBg), text: INK },
+		p2: { bg: hex(topBg), text: INK },
+		p3: { bg: hex(p3bg), text: INK },
 		// Poster 4 ("Vinyl"): solid dominant-colour background, like p1/p2.
-		p4: { bg: hex(topBg), text: hex(inkFor(topBg)) }
+		p4: { bg: hex(topBg), text: INK }
 	};
 }

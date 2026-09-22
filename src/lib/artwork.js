@@ -99,18 +99,30 @@ const isSquare = (c) => !!c && Math.abs(c.w - c.h) / Math.max(c.w, c.h) <= SQUAR
 // --- Apple -----------------------------------------------------------------
 async function appleUrl({ appleId, artist, title }, size) {
 	try {
-		const endpoint = appleId
-			? `https://itunes.apple.com/lookup?id=${encodeURIComponent(appleId)}`
-			: `https://itunes.apple.com/search?term=${encodeURIComponent(`${artist} ${title}`)}&entity=album&limit=25`;
-		const res = await fetch(endpoint);
-		if (!res.ok) return null;
-		const { results = [] } = await res.json();
-		const best = appleId
-			? results.find((r) => r.artworkUrl100)
-			: pickByName(results, (r) => r.collectionName, (r) => r.artistName, title, artist);
-		if (!best?.artworkUrl100) return null;
 		// Requesting a size larger than the master silently clamps to it.
-		return best.artworkUrl100.replace('100x100bb', `${size}x${size}bb`);
+		const sized = (r) => r?.artworkUrl100?.replace('100x100bb', `${size}x${size}bb`) || null;
+
+		// An id from MusicBrainz names a specific release, and that release is
+		// not always the edition the link asked for: DAMN.'s only live Apple
+		// relationship is "DAMN. COLLECTORS EDITION.", whose artwork differs.
+		// Trust the id outright only when it names this album exactly; otherwise
+		// let the search have a go and keep the id's answer as the floor.
+		let byId = null;
+		if (appleId) {
+			const res = await fetch(`https://itunes.apple.com/lookup?id=${encodeURIComponent(appleId)}`);
+			if (res.ok) {
+				byId = (await res.json()).results?.find((r) => r.artworkUrl100) || null;
+				if (byId && titleScore(byId.collectionName, title) === 2) return sized(byId);
+			}
+		}
+
+		const res = await fetch(
+			`https://itunes.apple.com/search?term=${encodeURIComponent(`${artist} ${title}`)}&entity=album&limit=25`
+		);
+		if (!res.ok) return sized(byId);
+		const { results = [] } = await res.json();
+		const best = pickByName(results, (r) => r.collectionName, (r) => r.artistName, title, artist);
+		return sized(best) || sized(byId);
 	} catch {
 		return null;
 	}
@@ -138,17 +150,29 @@ async function caaMeasure({ mbid, releaseGroupId }, variant, budgetMs) {
 // does, so the cover itself is still fetched directly.
 async function deezerUrl({ deezerId, artist, title }, size) {
 	try {
-		const query = deezerId
-			? `id=${encodeURIComponent(deezerId)}`
-			: `q=${encodeURIComponent(`${artist} ${title}`)}`;
-		const res = await fetch(`/api/deezer?${query}`);
-		if (!res.ok) return null;
+		const sized = (r) =>
+			r?.md5
+				? `https://e-cdns-images.dzcdn.net/images/cover/${r.md5}/${size}x${size}-000000-80-0-0.jpg`
+				: null;
+
+		// Same trap as Apple — MusicBrainz's Deezer id for DAMN. is also the
+		// collectors edition. Only the title is checked: Deezer localizes the
+		// artist name (it returns "ケンドリック・ラマー" for Kendrick Lamar).
+		let byId = null;
+		if (deezerId) {
+			const res = await fetch(`/api/deezer?id=${encodeURIComponent(deezerId)}`);
+			if (res.ok) {
+				const { results = [] } = await res.json();
+				byId = results.find((r) => r.md5) || null;
+				if (byId && titleScore(byId.title, title) === 2) return sized(byId);
+			}
+		}
+
+		const res = await fetch(`/api/deezer?q=${encodeURIComponent(`${artist} ${title}`)}`);
+		if (!res.ok) return sized(byId);
 		const { results = [] } = await res.json();
-		const best = deezerId
-			? results.find((r) => r.md5)
-			: pickByName(results, (r) => r.title, (r) => r.artist, title, artist);
-		if (!best?.md5) return null;
-		return `https://e-cdns-images.dzcdn.net/images/cover/${best.md5}/${size}x${size}-000000-80-0-0.jpg`;
+		const best = pickByName(results, (r) => r.title, (r) => r.artist, title, artist);
+		return sized(best) || sized(byId);
 	} catch {
 		return null;
 	}

@@ -1,8 +1,8 @@
 <script>
 	// POSTER 2 — "POLAROID" · a taped photo on a paper backdrop
-	import { trackScale, lumOf, withAlpha, autofit, trackColumns, META_FS, coverTransform, FRAME_NEUTRAL } from './util.js';
+	import { trackScale, withAlpha, autofit, trackColumns, META_FS, coverTransform, FRAME_NEUTRAL } from './util.js';
 	import { resolveFonts, resolveWeights, ROLE_DEFAULTS } from './fonts.js';
-	let { data, bg, fonts, frame = FRAME_NEUTRAL } = $props();
+	let { data, bg, text, fonts, frame = FRAME_NEUTRAL } = $props();
 
 	// Per-role fonts (user-chosen), falling back to this design's defaults.
 	const f = $derived(resolveFonts(ROLE_DEFAULTS[1], fonts));
@@ -13,10 +13,13 @@
 	const stamp = '#d8642a';
 
 	// Only the outer canvas background is user-controllable here (everything
-	// readable sits on floating paper photos/notes). Text printed directly on
-	// the canvas auto-contrasts so it stays legible on any chosen colour.
+	// readable sits on floating paper photos/notes).
 	const paper = $derived(bg || data.palette?.p2?.bg || '#efe2cb');
-	const onBg = $derived(lumOf(paper) > 0.5 ? '#3a3128' : '#f3e9d6');
+	// Text printed directly on the canvas, white by default like the other three
+	// designs. It used to auto-contrast against `paper`, which turned it dark on
+	// a light background; `ink` above still covers the paper cards, which are
+	// always light and would swallow white type.
+	const onBg = $derived(text || data.palette?.p2?.text || '#ffffff');
 	const onBgMuted = $derived(withAlpha(onBg, 0.6));
 
 	const k = $derived(trackScale(data.tracks.length));

@@ -11,15 +11,17 @@
 // Each family's css2 axis spec — the weights and italics the posters can ask
 // for. Keys match FONTS[*].family in src/lib/posters/fonts.js.
 const FAMILY_SPEC = {
-	Anton: 'Anton',
 	'Instrument Serif': 'Instrument+Serif:ital@0;1',
 	// Inter pins itself to weight 200 (FONTS.inter.weight), so resolveWeights
 	// always draws it at 200 and the other weights would be embedded unused.
 	Inter: 'Inter:ital,wght@0,200;1,200',
 	'Libre Baskerville': 'Libre+Baskerville:ital,wght@0,400;0,700;1,400',
+	Montserrat: 'Montserrat:wght@400;500;600;700',
+	'Open Sans': 'Open+Sans:wght@400;500;600;700',
 	'Public Sans': 'Public+Sans:wght@400;500;600;700',
-	'Space Grotesk': 'Space+Grotesk:wght@400;500;600;700',
-	'Space Mono': 'Space+Mono:wght@400;700'
+	Roboto: 'Roboto:wght@400;500;600;700',
+	Rubik: 'Rubik:wght@400;500;600;700',
+	'Space Grotesk': 'Space+Grotesk:wght@400;500;600;700'
 };
 
 // A modern browser UA makes Google Fonts serve woff2 (vs. legacy ttf).

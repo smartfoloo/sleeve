@@ -4,18 +4,29 @@
 	import Poster3 from '$lib/posters/Poster3.svelte';
 	import Poster4 from '$lib/posters/Poster4.svelte';
 	import Viewer3D from '$lib/Viewer3D.svelte';
+	import Slab3D from '$lib/Slab3D.svelte';
 	import Editor from '$lib/Editor.svelte';
 	import { extractPalette } from '$lib/posters/palette.js';
 	import { ROLE_DEFAULTS, googleFamilies } from '$lib/posters/fonts.js';
 	import { FRAME_NEUTRAL } from '$lib/posters/util.js';
 	import { previewArtwork, bestArtwork, uploadedArtwork } from '$lib/artwork.js';
-	import { tick } from 'svelte';
+	import { onMount, tick } from 'svelte';
 
 	const STYLES = [
 		{ comp: Poster1, no: '01', name: 'Editorial', tag: 'gallery print', text: true },
 		{ comp: Poster2, no: '02', name: 'Polaroid', tag: 'taped photo', text: false },
 		{ comp: Poster3, no: '03', name: 'Full Bleed', tag: 'cover to the edge', text: true },
 		{ comp: Poster4, no: '04', name: 'Vinyl', tag: 'cover as a record', text: true }
+	];
+
+	// Hero demo. One of these is picked at random per visit and resolved through
+	// the same artist+title path the manual fallback uses — no Spotify ids to keep
+	// current, and no edition ambiguity: all four match on track count.
+	const DEMO = [
+		{ artist: 'The Weeknd', title: 'Starboy' },
+		{ artist: 'Travis Scott', title: 'Utopia' },
+		{ artist: 'Kanye West', title: 'My Beautiful Dark Twisted Fantasy' },
+		{ artist: 'Playboi Carti', title: 'Playboi Carti' }
 	];
 
 	let link = $state('');
@@ -43,6 +54,15 @@
 
 	// The editor's live preview doubles as the capture node for every export.
 	let captureEl = $state(null);
+
+	// Hero demo state, entirely separate from the run above so a visitor hitting
+	// Generate mid-render can't collide with it.
+	let demo = $state(null); // the album picked for this visit
+	let heroData = $state(null); // poster-shaped data for the hero's Full Bleed render
+	let heroBg = $state(null);
+	let heroText = $state(null);
+	let heroPng = $state(null); // rasterised hero poster → 3D slab texture
+	let heroNode = $state(null); // hidden full-size capture node
 
 	const posterData = $derived.by(() => {
 		if (!album) return null;
@@ -202,11 +222,9 @@
 		return fontCssCache.get(key);
 	}
 
-	async function rasterizeNode(node, pixelRatio = 2, families = []) {
+	/** Rasterise a 600×848 poster node, with whatever cover is currently in it. */
+	async function capture(node, pixelRatio = 2, families = []) {
 		if (!node) return null;
-		// Every capture path (PNG, PDF, 3D, share) funnels through here, so this is
-		// the one place that needs to guarantee the export-grade cover is in place.
-		await ensureFullArt();
 		const [{ toPng }, fontEmbedCSS] = await Promise.all([
 			import('html-to-image'),
 			getFontCss(families)
@@ -229,6 +247,17 @@
 			style: { transform: 'none', transformOrigin: 'top left', margin: '0' },
 			fontEmbedCSS
 		});
+	}
+
+	async function rasterizeNode(node, pixelRatio = 2, families = []) {
+		if (!node) return null;
+		// Every user-facing capture path (PNG, PDF, 3D, share) funnels through
+		// here, so this is the one place that needs to guarantee the export-grade
+		// cover is in place. The hero deliberately calls `capture` instead: its
+		// preview cover is plenty for a slab texture, and running the contest
+		// would write to the state of whatever the visitor is generating.
+		await ensureFullArt();
+		return capture(node, pixelRatio, families);
 	}
 
 	// The editor's preview is CSS-scaled to fit the stage; rasterizeNode resets
@@ -355,6 +384,44 @@
 		}
 	}
 
+	/** Run the album on show in the hero through the normal load path. */
+	function openDemo() {
+		if (!demo) return;
+		return load(
+			'artist=' + encodeURIComponent(demo.artist) + '&title=' + encodeURIComponent(demo.title)
+		);
+	}
+
+	onMount(async () => {
+		// Build the hero demo: resolve a random album, render Full Bleed offscreen
+		// at full size, then rasterise it into the 3D slab. Best-effort — any
+		// failure just leaves the shimmer in place, without touching the app.
+		demo = DEMO[Math.floor(Math.random() * DEMO.length)];
+		try {
+			const res = await fetch(
+				'/api/album?artist=' +
+					encodeURIComponent(demo.artist) +
+					'&title=' +
+					encodeURIComponent(demo.title)
+			);
+			if (!res.ok) return;
+			const a = (await res.json()).album;
+			const preview = await previewArtwork(a);
+			if (!preview) return;
+			const pal = await extractPalette(preview.url).catch(() => null);
+			heroBg = pal?.p3?.bg ?? null;
+			heroText = pal?.p3?.text ?? null;
+			heroData = { ...a, cover: preview.url, palette: pal };
+			// Let the offscreen poster mount and its webfonts land before capturing,
+			// or the slab bakes in fallback type.
+			await tick();
+			if (document.fonts?.ready) await document.fonts.ready.catch(() => {});
+			await tick();
+			heroPng = await capture(heroNode, 2, googleFamilies(ROLE_DEFAULTS[DEFAULT_LAYOUT], null));
+		} catch {
+			/* leave the hero empty */
+		}
+	});
 </script>
 
 <svelte:head>
@@ -387,7 +454,31 @@
 				Paste a Spotify album link. We pull the cover, tracklist and runtime, then generate four A4 poster designs inspired by classic record sleeves.
 			</p>
 		</div>
+		<div class="hero-art">
+			{#if heroPng && demo}
+				<button
+					class="hero-slab"
+					onclick={openDemo}
+					disabled={loading}
+					aria-label="Open {demo.artist} · {demo.title} in the editor"
+				>
+					<Slab3D src={heroPng} />
+					<span class="hero-cta">{demo.title} · open in the editor ▸</span>
+				</button>
+			{:else}
+				<div class="hero-skel" aria-hidden="true"></div>
+			{/if}
+		</div>
 	</header>
+
+	<!-- offscreen full-size render, only used to rasterise the hero slab -->
+	<div class="offscreen" aria-hidden="true">
+		<div bind:this={heroNode}>
+			{#if heroData}
+				<Poster3 data={heroData} bg={heroBg} text={heroText} />
+			{/if}
+		</div>
+	</div>
 
 	<section class="console">
 		<label class="field">
@@ -432,15 +523,17 @@
 		</div>
 	{/if}
 
-	{#if !posterData && !loading}
-		<div class="empty">
-			<p>No record loaded. Try <button class="linkish" onclick={() => { link = 'https://open.spotify.com/album/5K79FLRUCSysQnVESLcTdb'; generate(); }}>Bad Bunny — Debí Tirar Más Fotos</button>.</p>
-		</div>
-	{/if}
-
 	<footer class="foot">
-		<span>Metadata via <a href="https://musicbrainz.org" target="_blank" rel="noreferrer">MusicBrainz</a> · covers via Cover Art Archive, Apple and Deezer</span>
-		<span>Four poster studies after a Claude Design original</span>
+		<div class="foot-row">
+			<span>Metadata via <a href="https://musicbrainz.org" target="_blank" rel="noreferrer">MusicBrainz</a> · covers via Cover Art Archive, Apple and Deezer</span>
+			<span>Four poster studies after a Claude Design original</span>
+		</div>
+		<p class="foot-legal">
+			Album art, titles and track listings belong to their respective artists, labels and
+			rights holders. Sleeve doesn't host or redistribute them. Covers are fetched by your
+			browser directly from the source, and posters are rendered and saved on your own device,
+			for personal use. <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a>
+		</p>
 	</footer>
 </div>
 
@@ -560,6 +653,78 @@
 		flex: 1 1 460px;
 		max-width: 600px;
 	}
+	.hero-art {
+		flex: none;
+		width: clamp(280px, 34vw, 400px);
+		height: 470px;
+	}
+	/* The slab is a button: clicking it loads that album into the editor. */
+	.hero-slab {
+		position: relative;
+		display: block;
+		width: 100%;
+		height: 100%;
+		padding: 0;
+		border: none;
+		background: none;
+		cursor: pointer;
+	}
+	/* Slab3D sets `cursor: grab` on its own host, which would read as draggable. */
+	.hero-slab :global(.slab) {
+		cursor: inherit;
+	}
+	.hero-slab:disabled {
+		cursor: progress;
+	}
+	.hero-cta {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		font-size: 11.5px;
+		letter-spacing: 0.04em;
+		color: #8a8276;
+		opacity: 0;
+		transition: opacity 0.18s;
+	}
+	.hero-slab:hover .hero-cta,
+	.hero-slab:focus-visible .hero-cta {
+		opacity: 1;
+	}
+	.hero-skel {
+		width: 78%;
+		height: 100%;
+		margin: 0 auto;
+		border-radius: 4px;
+		background: linear-gradient(
+			110deg,
+			rgba(28, 25, 22, 0.06) 30%,
+			rgba(28, 25, 22, 0.12) 50%,
+			rgba(28, 25, 22, 0.06) 70%
+		);
+		background-size: 200% 100%;
+		animation: shimmer 1.4s infinite;
+	}
+	@keyframes shimmer {
+		from {
+			background-position: 200% 0;
+		}
+		to {
+			background-position: -200% 0;
+		}
+	}
+	/* hidden full-size poster, only used to rasterise the hero slab */
+	.offscreen {
+		position: fixed;
+		left: -100000px;
+		top: 0;
+		width: 600px;
+		height: 848px;
+		overflow: hidden;
+		pointer-events: none;
+		z-index: -1;
+	}
+
   
 	h1 {
 		font-family: 'Libre Baskerville', serif;
@@ -690,12 +855,6 @@
 		flex: 1 1 200px;
 	}
 
-	.empty {
-		margin-top: 46px;
-		text-align: center;
-		color: #8a8276;
-		font-size: 15px;
-	}
 	.linkish {
 		font: inherit;
 		color: oklch(0.42 0.11 150);
@@ -710,14 +869,23 @@
 		margin-top: 60px;
 		padding-top: 18px;
 		border-top: 1.5px solid rgba(28, 25, 22, 0.2);
+		font-family: 'Public Sans', sans-serif;
+		font-size: 13px;
+		letter-spacing: 0.03em;
+		color: #8a8276;
+	}
+	.foot-row {
 		display: flex;
 		justify-content: space-between;
 		flex-wrap: wrap;
 		gap: 8px;
-		font-family: 'Public Sans', sans-serif;
-		font-size: 10.5px;
-		letter-spacing: 0.04em;
-		color: #8a8276;
+	}
+	.foot-legal {
+		margin: 14px 0 0;
+		max-width: 640px;
+		font-size: 13px;
+		line-height: 1.6;
+		letter-spacing: 0.02em;
 	}
 	.foot a {
 		color: oklch(0.42 0.11 150);
@@ -728,10 +896,24 @@
 			flex-direction: column;
 			align-items: flex-start;
 		}
+		.hero-art {
+			width: 100%;
+			max-width: 360px;
+			height: 420px;
+			align-self: center;
+		}
 	}
 	@media (max-width: 640px) {
 		.go {
 			width: 100%;
+		}
+		.hero-art {
+			display: none;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.hero-skel {
+			animation: none;
 		}
 	}
 </style>

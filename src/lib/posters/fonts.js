@@ -17,9 +17,11 @@ export const FONTS = {
 	inter: { label: 'Inter', family: 'Inter', stack: "'Inter', sans-serif", width: 0.718, weight: 200 },
 	publicsans: { label: 'Public Sans', family: 'Public Sans', stack: "'Public Sans', sans-serif", width: 0.709 },
 	sf: { label: 'SF Pro', stack: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif", width: 0.789 },
-	mono: { label: 'Space Mono', family: 'Space Mono', stack: "'Space Mono', monospace", width: 0.64 },
-	anton: { label: 'Anton', family: 'Anton', stack: "'Anton', sans-serif", width: 0.704 },
-	grotesk: { label: 'Space Grotesk', family: 'Space Grotesk', stack: "'Space Grotesk', sans-serif", width: 0.739 }
+	grotesk: { label: 'Space Grotesk', family: 'Space Grotesk', stack: "'Space Grotesk', sans-serif", width: 0.739 },
+	opensans: { label: 'Open Sans', family: 'Open Sans', stack: "'Open Sans', sans-serif", width: 0.748 },
+	roboto: { label: 'Roboto', family: 'Roboto', stack: "'Roboto', sans-serif", width: 0.759 },
+	rubik: { label: 'Rubik', family: 'Rubik', stack: "'Rubik', sans-serif", width: 0.733 },
+	montserrat: { label: 'Montserrat', family: 'Montserrat', stack: "'Montserrat', sans-serif", width: 0.67 }
 };
 
 // Order the dropdown lists in.
@@ -29,9 +31,11 @@ export const FONT_KEYS = [
 	'inter',
 	'publicsans',
 	'sf',
-	'mono',
-	'anton',
-	'grotesk'
+	'grotesk',
+	'opensans',
+	'roboto',
+	'rubik',
+	'montserrat'
 ];
 
 // The five text roles each poster exposes, in panel order.
